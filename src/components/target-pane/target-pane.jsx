@@ -4,12 +4,56 @@ import React from 'react';
 import VM from 'scratch-vm';
 
 import SpriteLibrary from '../../containers/sprite-library.jsx';
-import MlogTargetPane from './mlog-target-pane.jsx';
 import SpriteSelectorComponent from '../sprite-selector/sprite-selector.jsx';
 import StageSelector from '../../containers/stage-selector.jsx';
 import {STAGE_DISPLAY_SIZES} from '../../lib/layout-constants';
+import {
+    deleteStageNode,
+    getGraphState,
+    getNodeInfo,
+    getProcessorForNode,
+    selectProcessor,
+    selectStageNode,
+    subscribeGraphState,
+    updateNodeField
+} from '../../lib/mlog-stage-store';
 
 import styles from './target-pane.css';
+
+const useGraphState = () => {
+    const [graphState, setGraphState] = React.useState(getGraphState());
+    React.useEffect(() => subscribeGraphState(setGraphState), []);
+    return graphState;
+};
+
+const buildGraphSprites = project => project.stage.nodes.reduce((sprites, node, index) => {
+    const info = getNodeInfo(node);
+    const processor = getProcessorForNode(project, node.id);
+    sprites[node.id] = {
+        costume: {
+            asset: null,
+            bitmapResolution: 1,
+            name: info.label,
+            rotationCenterX: 0,
+            rotationCenterY: 0,
+            url: info.icon
+        },
+        costumeURL: info.icon,
+        details: processor ?
+            `${processor.name} · ${processor.links.length} links` :
+            `${info.label} · scriptless node`,
+        direction: 90,
+        id: node.id,
+        name: node.linkName,
+        order: index,
+        rotationStyle: 'all around',
+        size: 100,
+        visible: true,
+        x: node.x,
+        y: node.y
+    };
+    return sprites;
+}, {});
 
 /*
  * Pane that contains the sprite selector, sprite info, stage selector,
@@ -50,16 +94,64 @@ const TargetPane = ({
     vm,
     ...componentProps
 }) => {
+    const graphState = useGraphState();
+    const graphSprites = buildGraphSprites(graphState.project);
     if (useGraphTargets) {
+        const {project, selectedStageNodeId} = graphState;
+        const selectedNode = selectedStageNodeId ?
+            project.stage.nodes.find(node => node.id === selectedStageNodeId) :
+            null;
+        const openGraphNodeLibrary = event => {
+            if (event && event.preventDefault) {
+                event.preventDefault();
+            }
+            onNewSpriteClick(event);
+        };
+        const noop = event => {
+            if (event && event.preventDefault) {
+                event.preventDefault();
+            }
+        };
+        const handleSelectSprite = nodeId => {
+            const processor = getProcessorForNode(project, nodeId);
+            if (processor) {
+                selectProcessor(processor.id);
+            } else {
+                selectStageNode(nodeId);
+            }
+        };
+        const updateSelectedNodeField = field => value => {
+            if (!selectedNode) return;
+            updateNodeField(selectedNode.id, field, value);
+        };
+
         return (
             <div
                 className={styles.targetPane}
                 {...componentProps}
             >
-                <MlogTargetPane
+                <SpriteSelectorComponent
+                    editingTarget={selectedStageNodeId}
                     hoveredTarget={hoveredTarget}
-                    onOpenLibrary={onNewSpriteClick}
                     raised={raiseSprites}
+                    selectedId={selectedStageNodeId}
+                    spriteFileInput={fileInputRef}
+                    sprites={graphSprites}
+                    stageSize={stageSize}
+                    onChangeSpriteDirection={updateSelectedNodeField('direction')}
+                    onChangeSpriteName={updateSelectedNodeField('name')}
+                    onChangeSpriteRotationStyle={updateSelectedNodeField('rotationStyle')}
+                    onChangeSpriteSize={updateSelectedNodeField('size')}
+                    onChangeSpriteVisibility={updateSelectedNodeField('visible')}
+                    onChangeSpriteX={updateSelectedNodeField('x')}
+                    onChangeSpriteY={updateSelectedNodeField('y')}
+                    onDeleteSprite={deleteStageNode}
+                    onFileUploadClick={openGraphNodeLibrary}
+                    onNewSpriteClick={openGraphNodeLibrary}
+                    onPaintSpriteClick={openGraphNodeLibrary}
+                    onSelectSprite={handleSelectSprite}
+                    onSpriteUpload={noop}
+                    onSurpriseSpriteClick={openGraphNodeLibrary}
                 />
                 <div>
                     {graphNodeLibraryVisible ? (

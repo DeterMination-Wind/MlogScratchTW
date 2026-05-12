@@ -523,7 +523,7 @@ export const updateNodeField = (nodeId, key, value) => {
     } else if (key === 'linkName') {
         node.linkName = normalizeSymbol(value, node.linkName);
     } else {
-        node[key] = value || node[key];
+        node[key] = value;
     }
 
     const processor = getProcessorForNode(project, nodeId);
