@@ -1,11 +1,7 @@
 import {stageBlockTypes} from './mindustry-assets';
 
 export const MLOG_STORAGE_KEY = 'mlog-scratch-studio-project-v1';
-
-export const STAGE_GRID = {
-    cols: 12,
-    rows: 8
-};
+export const STAGE_GRID = {cols: 12, rows: 8};
 
 export const paletteCategories = [
     {
@@ -349,49 +345,49 @@ export function createStageNode (type, x, y, options = {}) {
 export function createDefaultProject () {
     const nodes = [];
 
-    const logicNode = createStageNode('logic-processor', 1, 1, {
+    const logicNode = createStageNode('logic-processor', 140, 120, {
         name: '主逻辑处理器',
         linkName: 'logic1',
         nodes
     });
     nodes.push(logicNode);
 
-    const memoryCellNode = createStageNode('memory-cell', 4, 1, {
+    const memoryCellNode = createStageNode('memory-cell', 320, 120, {
         name: '内存元',
         linkName: 'cell1',
         nodes
     });
     nodes.push(memoryCellNode);
 
-    const messageNode = createStageNode('message', 6, 1, {
+    const messageNode = createStageNode('message', 470, 120, {
         name: '消息板',
         linkName: 'message1',
         nodes
     });
     nodes.push(messageNode);
 
-    const worldNode = createStageNode('world-processor', 2, 5, {
+    const worldNode = createStageNode('world-processor', 200, 420, {
         name: '世界处理器',
         linkName: 'world1',
         nodes
     });
     nodes.push(worldNode);
 
-    const worldCellNode = createStageNode('world-cell', 5, 5, {
+    const worldCellNode = createStageNode('world-cell', 380, 420, {
         name: '世界内存元',
         linkName: 'worldcell1',
         nodes
     });
     nodes.push(worldCellNode);
 
-    const switchNode = createStageNode('switch', 9, 5, {
+    const switchNode = createStageNode('switch', 670, 420, {
         name: '开关',
         linkName: 'switch1',
         nodes
     });
     nodes.push(switchNode);
 
-    const worldMessageNode = createStageNode('world-message', 8, 1, {
+    const worldMessageNode = createStageNode('world-message', 650, 120, {
         name: '世界消息板',
         linkName: 'worldmessage1',
         nodes
@@ -404,12 +400,8 @@ export function createDefaultProject () {
         stageNodeId: logicNode.id,
         links: [memoryCellNode.id, messageNode.id, switchNode.id],
         program: {
-            blocks: [
-                createScriptBlock({opcode: 'comment', label: '注释', args: ['text']}, 'program'),
-                createScriptBlock({opcode: 'read', label: 'read cell', args: ['out', 'cell', '#']}, 'program'),
-                createScriptBlock({opcode: 'while', label: 'while', args: ['condition'], container: true}, 'control'),
-                createScriptBlock({opcode: 'printflush', label: 'printflush', args: ['message']}, 'program')
-            ]
+            blocks: [],
+            workspaceXml: '<xml xmlns="http://www.w3.org/1999/xhtml"></xml>'
         }
     };
 
@@ -419,11 +411,8 @@ export function createDefaultProject () {
         stageNodeId: worldNode.id,
         links: [worldCellNode.id, worldMessageNode.id],
         program: {
-            blocks: [
-                createScriptBlock({opcode: 'comment', label: '注释', args: ['text']}, 'program'),
-                createScriptBlock({opcode: 'getblock', label: 'getblock', args: ['x', 'y']}, 'world'),
-                createScriptBlock({opcode: 'setblock', label: 'setblock', args: ['block', 'x', 'y']}, 'world')
-            ]
+            blocks: [],
+            workspaceXml: '<xml xmlns="http://www.w3.org/1999/xhtml"></xml>'
         }
     };
 
@@ -432,8 +421,10 @@ export function createDefaultProject () {
         title: 'Mlog Scratch UI',
         activeProcessorId: processorMain.id,
         stage: {
-            cols: STAGE_GRID.cols,
-            rows: STAGE_GRID.rows,
+            bounds: {
+                width: 960,
+                height: 640
+            },
             nodes
         },
         processors: [processorMain, processorWorld],

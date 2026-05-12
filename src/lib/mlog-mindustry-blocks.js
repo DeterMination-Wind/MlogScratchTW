@@ -291,6 +291,9 @@ export const mindustryLogicCategories = [
         name: 'I/O',
         color: categoryColors.io,
         blocks: [
+            block('comment', '# %1', [
+                text('text', 'note')
+            ]),
             block('read', 'read %1 = %2 at %3', [
                 text('out', 'result'),
                 text('cell', 'cell1'),

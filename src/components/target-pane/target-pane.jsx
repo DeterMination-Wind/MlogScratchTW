@@ -4,6 +4,7 @@ import React from 'react';
 import VM from 'scratch-vm';
 
 import SpriteLibrary from '../../containers/sprite-library.jsx';
+import MlogTargetPane from './mlog-target-pane.jsx';
 import SpriteSelectorComponent from '../sprite-selector/sprite-selector.jsx';
 import StageSelector from '../../containers/stage-selector.jsx';
 import {STAGE_DISPLAY_SIZES} from '../../lib/layout-constants';
@@ -20,6 +21,7 @@ const TargetPane = ({
     editingTarget,
     fileInputRef,
     hoveredTarget,
+    graphNodeLibraryVisible,
     spriteLibraryVisible,
     onActivateBlocksTab,
     onChangeSpriteDirection,
@@ -44,63 +46,90 @@ const TargetPane = ({
     stage,
     stageSize,
     sprites,
+    useGraphTargets,
     vm,
     ...componentProps
-}) => (
-    <div
-        className={styles.targetPane}
-        {...componentProps}
-    >
+}) => {
+    if (useGraphTargets) {
+        return (
+            <div
+                className={styles.targetPane}
+                {...componentProps}
+            >
+                <MlogTargetPane
+                    hoveredTarget={hoveredTarget}
+                    onOpenLibrary={onNewSpriteClick}
+                    raised={raiseSprites}
+                />
+                <div>
+                    {graphNodeLibraryVisible ? (
+                        <SpriteLibrary
+                            vm={vm}
+                            onActivateBlocksTab={onActivateBlocksTab}
+                            onRequestClose={onRequestCloseSpriteLibrary}
+                        />
+                    ) : null}
+                </div>
+            </div>
+        );
+    }
 
-        <SpriteSelectorComponent
-            editingTarget={editingTarget}
-            hoveredTarget={hoveredTarget}
-            raised={raiseSprites}
-            selectedId={editingTarget}
-            spriteFileInput={fileInputRef}
-            sprites={sprites}
-            stageSize={stageSize}
-            onChangeSpriteDirection={onChangeSpriteDirection}
-            onChangeSpriteName={onChangeSpriteName}
-            onChangeSpriteRotationStyle={onChangeSpriteRotationStyle}
-            onChangeSpriteSize={onChangeSpriteSize}
-            onChangeSpriteVisibility={onChangeSpriteVisibility}
-            onChangeSpriteX={onChangeSpriteX}
-            onChangeSpriteY={onChangeSpriteY}
-            onDeleteSprite={onDeleteSprite}
-            onDrop={onDrop}
-            onDuplicateSprite={onDuplicateSprite}
-            onExportSprite={onExportSprite}
-            onFileUploadClick={onFileUploadClick}
-            onNewSpriteClick={onNewSpriteClick}
-            onPaintSpriteClick={onPaintSpriteClick}
-            onSelectSprite={onSelectSprite}
-            onSpriteUpload={onSpriteUpload}
-            onSurpriseSpriteClick={onSurpriseSpriteClick}
-        />
-        <div className={styles.stageSelectorWrapper}>
-            {stage.id && <StageSelector
-                asset={
-                    stage.costume &&
-                    stage.costume.asset
-                }
-                backdropCount={stage.costumeCount}
-                id={stage.id}
-                selected={stage.id === editingTarget}
-                onSelect={onSelectSprite}
-            />}
-            <div>
-                {spriteLibraryVisible ? (
-                    <SpriteLibrary
-                        vm={vm}
-                        onActivateBlocksTab={onActivateBlocksTab}
-                        onRequestClose={onRequestCloseSpriteLibrary}
-                    />
-                ) : null}
+    return (
+        <div
+            className={styles.targetPane}
+            {...componentProps}
+        >
+
+            <SpriteSelectorComponent
+                editingTarget={editingTarget}
+                hoveredTarget={hoveredTarget}
+                raised={raiseSprites}
+                selectedId={editingTarget}
+                spriteFileInput={fileInputRef}
+                sprites={sprites}
+                stageSize={stageSize}
+                onChangeSpriteDirection={onChangeSpriteDirection}
+                onChangeSpriteName={onChangeSpriteName}
+                onChangeSpriteRotationStyle={onChangeSpriteRotationStyle}
+                onChangeSpriteSize={onChangeSpriteSize}
+                onChangeSpriteVisibility={onChangeSpriteVisibility}
+                onChangeSpriteX={onChangeSpriteX}
+                onChangeSpriteY={onChangeSpriteY}
+                onDeleteSprite={onDeleteSprite}
+                onDrop={onDrop}
+                onDuplicateSprite={onDuplicateSprite}
+                onExportSprite={onExportSprite}
+                onFileUploadClick={onFileUploadClick}
+                onNewSpriteClick={onNewSpriteClick}
+                onPaintSpriteClick={onPaintSpriteClick}
+                onSelectSprite={onSelectSprite}
+                onSpriteUpload={onSpriteUpload}
+                onSurpriseSpriteClick={onSurpriseSpriteClick}
+            />
+            <div className={styles.stageSelectorWrapper}>
+                {stage.id && <StageSelector
+                    asset={
+                        stage.costume &&
+                        stage.costume.asset
+                    }
+                    backdropCount={stage.costumeCount}
+                    id={stage.id}
+                    selected={stage.id === editingTarget}
+                    onSelect={onSelectSprite}
+                />}
+                <div>
+                    {spriteLibraryVisible ? (
+                        <SpriteLibrary
+                            vm={vm}
+                            onActivateBlocksTab={onActivateBlocksTab}
+                            onRequestClose={onRequestCloseSpriteLibrary}
+                        />
+                    ) : null}
+                </div>
             </div>
         </div>
-    </div>
-);
+    );
+};
 
 const spriteShape = PropTypes.shape({
     costume: PropTypes.shape({
@@ -129,6 +158,7 @@ TargetPane.propTypes = {
     editingTarget: PropTypes.string,
     extensionLibraryVisible: PropTypes.bool,
     fileInputRef: PropTypes.func,
+    graphNodeLibraryVisible: PropTypes.bool,
     hoveredTarget: PropTypes.shape({
         hoveredSprite: PropTypes.string,
         receivedBlocks: PropTypes.bool
@@ -158,6 +188,7 @@ TargetPane.propTypes = {
     sprites: PropTypes.objectOf(spriteShape),
     stage: spriteShape,
     stageSize: PropTypes.oneOf(Object.keys(STAGE_DISPLAY_SIZES)).isRequired,
+    useGraphTargets: PropTypes.bool,
     vm: PropTypes.instanceOf(VM)
 };
 
