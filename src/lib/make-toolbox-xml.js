@@ -882,6 +882,7 @@ const makeToolboxXML = function (isInitialSetup, isStage = true, targetId, categ
 
     const listsXML = moveCategory('lists') || lists(isInitialSetup, isStage, targetId, colors.more);
     const flowXML = flow();
+    const operatorsXML = operators(isInitialSetup, isStage, targetId, colors.operators);
     const myBlocksXML = moveCategory('procedures') || myBlocks(isInitialSetup, isStage, targetId, colors.more);
     const everything = [xmlOpen];
 
@@ -894,7 +895,7 @@ const makeToolboxXML = function (isInitialSetup, isStage = true, targetId, categ
             everything.push(categoryXML);
         });
 
-    everything.push(gap, flowXML, gap, listsXML, gap, myBlocksXML);
+    everything.push(gap, flowXML, gap, operatorsXML, gap, listsXML, gap, myBlocksXML);
 
     if (turbowarpXML) {
         everything.push(gap, turbowarpXML);

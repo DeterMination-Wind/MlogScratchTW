@@ -12,23 +12,23 @@ export const mlogFlowCategory = {
 export default function registerMlogSugarBlocks (ScratchBlocks) {
     ScratchBlocks.Blocks.if = {
         init () {
-            this.appendDummyInput()
-                .appendField('if')
-                .appendField(textField(ScratchBlocks, 'enabled == true'), 'condition');
+            this.appendValueInput('CONDITION')
+                .setCheck('Boolean')
+                .appendField('if');
             this.appendStatementInput('body')
                 .appendField('do');
             this.setPreviousStatement(true);
             this.setNextStatement(true);
             this.setColour(flowColor);
-            this.setTooltip('条件成立时执行一次 body。');
+            this.setTooltip('条件成立时执行一次 body。可以接入 TurboWarp 原生比较 / 与 / 或 / 非积木。');
         }
     };
 
     ScratchBlocks.Blocks.if_else = {
         init () {
-            this.appendDummyInput()
-                .appendField('if')
-                .appendField(textField(ScratchBlocks, 'enabled == true'), 'condition');
+            this.appendValueInput('CONDITION')
+                .setCheck('Boolean')
+                .appendField('if');
             this.appendStatementInput('body')
                 .appendField('then');
             this.appendStatementInput('elseBody')
@@ -36,7 +36,7 @@ export default function registerMlogSugarBlocks (ScratchBlocks) {
             this.setPreviousStatement(true);
             this.setNextStatement(true);
             this.setColour(flowColor);
-            this.setTooltip('条件分支语句。');
+            this.setTooltip('条件分支语句。条件可拼接 TurboWarp 原生逻辑积木。');
         }
     };
 
@@ -83,15 +83,15 @@ export default function registerMlogSugarBlocks (ScratchBlocks) {
 
     ScratchBlocks.Blocks.while = {
         init () {
-            this.appendDummyInput()
-                .appendField('while')
-                .appendField(textField(ScratchBlocks, 'enabled == true'), 'condition');
+            this.appendValueInput('CONDITION')
+                .setCheck('Boolean')
+                .appendField('while');
             this.appendStatementInput('body')
                 .appendField('do');
             this.setPreviousStatement(true);
             this.setNextStatement(true);
             this.setColour(flowColor);
-            this.setTooltip('条件循环语句。');
+            this.setTooltip('条件循环语句。条件可使用 TurboWarp 比较 / 与 / 或 / 非积木。');
         }
     };
 
