@@ -1,12 +1,45 @@
 export const EMPTY_WORKSPACE_XML = '<xml xmlns="http://www.w3.org/1999/xhtml"></xml>';
 
+const xmlEscape = value => String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const isExprNode = value => value !== null && typeof value === 'object' && typeof value.kind === 'string';
+
 const inputValueMap = {
     mlog_list_define: ['start', 'length'],
     mlog_list_get: ['index'],
     mlog_list_set: ['index'],
     mlog_list_find_first: ['value'],
     mlog_list_count_value: ['value'],
-    procedures_return: ['value']
+    procedures_return: ['value'],
+    if: ['CONDITION'],
+    if_else: ['CONDITION'],
+    while: ['CONDITION']
+};
+
+const TW_OP_BINARY = {
+    operator_add: {kind: 'op', op: 'add', a: 'NUM1', b: 'NUM2'},
+    operator_subtract: {kind: 'op', op: 'sub', a: 'NUM1', b: 'NUM2'},
+    operator_multiply: {kind: 'op', op: 'mul', a: 'NUM1', b: 'NUM2'},
+    operator_divide: {kind: 'op', op: 'div', a: 'NUM1', b: 'NUM2'},
+    operator_mod: {kind: 'op', op: 'mod', a: 'NUM1', b: 'NUM2'},
+    operator_lt: {kind: 'compare', op: 'lessThan', a: 'OPERAND1', b: 'OPERAND2'},
+    operator_gt: {kind: 'compare', op: 'greaterThan', a: 'OPERAND1', b: 'OPERAND2'},
+    operator_equals: {kind: 'compare', op: 'equal', a: 'OPERAND1', b: 'OPERAND2'},
+    operator_and: {kind: 'logic', op: 'and', a: 'OPERAND1', b: 'OPERAND2'},
+    operator_or: {kind: 'logic', op: 'or', a: 'OPERAND1', b: 'OPERAND2'},
+    operator_contains: {kind: 'string', op: 'contains', a: 'STRING1', b: 'STRING2'},
+    operator_join: {kind: 'string', op: 'join', a: 'STRING1', b: 'STRING2'},
+    operator_letter_of: {kind: 'string', op: 'letter_of', a: 'LETTER', b: 'STRING'}
+};
+
+const TW_OP_UNARY = {
+    operator_not: {kind: 'logic', op: 'not', input: 'OPERAND'},
+    operator_round: {kind: 'mathop', op: 'round', input: 'NUM'},
+    operator_length: {kind: 'string', op: 'length', input: 'STRING'}
 };
 
 const topLevelLayout = index => ({
@@ -40,10 +73,88 @@ const getInputBlock = (blocks, block, inputName) => {
     return blocks[targetId] || null;
 };
 
+const literalNode = value => ({kind: 'literal', value: String(value == null ? '' : value)});
+
+const expressionNodeForBlock = (blocks, block) => {
+    if (!block) return null;
+
+    if (block.opcode === 'math_number' || block.opcode === 'math_whole_number' ||
+        block.opcode === 'math_positive_number' || block.opcode === 'math_integer' ||
+        block.opcode === 'math_angle') {
+        return literalNode(getBlockFieldValue(block, 'NUM', '0'));
+    }
+    if (block.opcode === 'text') {
+        return literalNode(JSON.stringify(String(getBlockFieldValue(block, 'TEXT', ''))));
+    }
+    if (block.opcode === 'argument_reporter_string_number' ||
+        block.opcode === 'argument_reporter_boolean') {
+        return literalNode(getBlockFieldValue(block, 'VALUE', 'arg'));
+    }
+
+    if (TW_OP_BINARY[block.opcode]) {
+        const def = TW_OP_BINARY[block.opcode];
+        const a = expressionForInput(blocks, block, def.a) || literalNode('0');
+        const b = expressionForInput(blocks, block, def.b) || literalNode('0');
+        return {kind: def.kind, op: def.op, args: [a, b]};
+    }
+
+    if (TW_OP_UNARY[block.opcode]) {
+        const def = TW_OP_UNARY[block.opcode];
+        const a = expressionForInput(blocks, block, def.input) || literalNode('0');
+        return {kind: def.kind, op: def.op, args: [a]};
+    }
+
+    if (block.opcode === 'operator_random') {
+        const from = expressionForInput(blocks, block, 'FROM') || literalNode('1');
+        const to = expressionForInput(blocks, block, 'TO') || literalNode('10');
+        return {kind: 'random', op: 'random', args: [from, to]};
+    }
+
+    if (block.opcode === 'operator_mathop') {
+        const which = String(getBlockFieldValue(block, 'OPERATOR', 'abs')).toLowerCase();
+        const opMap = {
+            'abs': 'abs',
+            'floor': 'floor',
+            'ceiling': 'ceiling',
+            'sqrt': 'sqrt',
+            'sin': 'sin',
+            'cos': 'cos',
+            'tan': 'tan',
+            'asin': 'asin',
+            'acos': 'acos',
+            'atan': 'atan',
+            'ln': 'ln',
+            'log': 'log',
+            'e ^': 'expe',
+            '10 ^': 'pow10'
+        };
+        const op = opMap[which] || which;
+        const inner = expressionForInput(blocks, block, 'NUM') || literalNode('0');
+        if (op === 'expe' || op === 'pow10') {
+            return {kind: 'mathop', op, args: [inner]};
+        }
+        return {kind: 'mathop', op, args: [inner]};
+    }
+
+    return null;
+};
+
+const expressionForInput = (blocks, block, inputName) => {
+    if (!block) return null;
+    const inner = getInputBlock(blocks, block, inputName);
+    if (!inner) return null;
+    return expressionNodeForBlock(blocks, inner);
+};
+
 const connectedInputValue = (blocks, block, inputName, fallback = '') => {
     const inputBlock = getInputBlock(blocks, block, inputName);
     if (!inputBlock) return fallback;
-    return expressionForBlock(blocks, inputBlock, fallback);
+    const expr = expressionNodeForBlock(blocks, inputBlock);
+    if (expr) {
+        if (expr.kind === 'literal') return expr.value;
+        return expr;
+    }
+    return fallback;
 };
 
 const normalizeArgsList = raw => {
@@ -88,22 +199,6 @@ const sanitizeMutationJson = rawValue => {
     }
 };
 
-const expressionForBlock = (blocks, block, fallback = '') => {
-    if (!block) return fallback;
-
-    switch (block.opcode) {
-    case 'math_number':
-        return String(getBlockFieldValue(block, 'NUM', fallback || '0'));
-    case 'text':
-        return JSON.stringify(String(getBlockFieldValue(block, 'TEXT', fallback || '')));
-    case 'argument_reporter_string_number':
-    case 'argument_reporter_boolean':
-        return String(getBlockFieldValue(block, 'VALUE', fallback || 'arg'));
-    default:
-        return String(getBlockFieldValue(block, 'TEXT', fallback || block.opcode || 'value'));
-    }
-};
-
 const fieldsForMlogBlock = (blocks, block) => {
     const fields = {};
     if (!block || !block.fields) return fields;
@@ -114,7 +209,13 @@ const fieldsForMlogBlock = (blocks, block) => {
 
     const valueInputs = inputValueMap[block.opcode] || [];
     valueInputs.forEach(inputName => {
-        fields[inputName] = connectedInputValue(blocks, block, inputName, fields[inputName] || '');
+        const target = inputName === 'CONDITION' ? 'condition' : inputName;
+        const connected = connectedInputValue(blocks, block, inputName, null);
+        if (connected !== null) {
+            fields[target] = connected;
+        } else if (target !== inputName && (fields[target] === undefined || fields[target] === '')) {
+            fields[target] = fields[target] || '';
+        }
     });
 
     if (block.opcode === 'procedures_call') {
@@ -220,7 +321,8 @@ const inputXmlForValue = (name, value) => {
     return `
         <value name="${name}">
             <shadow type="text">
-                <field name="TEXT">${normalized.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</field>
+                <field name="TEXT">${normalized.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')}</field>
             </shadow>
         </value>
     `;
@@ -265,11 +367,142 @@ const mutationXmlForProcedure = block => {
     };
 };
 
-const xmlEscape = value => String(value == null ? '' : value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+const TW_OP_REVERSE = (() => {
+    const result = {};
+    Object.entries(TW_OP_BINARY).forEach(([type, def]) => {
+        result[`${def.kind}:${def.op}`] = {type, a: def.a, b: def.b};
+    });
+    Object.entries(TW_OP_UNARY).forEach(([type, def]) => {
+        result[`${def.kind}:${def.op}`] = {type, a: def.input};
+    });
+    return result;
+})();
+
+const MATHOP_REVERSE = {
+    abs: 'abs',
+    floor: 'floor',
+    ceiling: 'ceiling',
+    sqrt: 'sqrt',
+    sin: 'sin',
+    cos: 'cos',
+    tan: 'tan',
+    asin: 'asin',
+    acos: 'acos',
+    atan: 'atan',
+    ln: 'ln',
+    log: 'log',
+    expe: 'e ^',
+    pow10: '10 ^'
+};
+
+let exprIdCounter = 0;
+const nextExprId = () => {
+    exprIdCounter += 1;
+    return `expr-${exprIdCounter}`;
+};
+
+const literalShadowXml = value => {
+    const text = String(value == null ? '' : value);
+    if (/^-?\d+(\.\d+)?$/.test(text)) {
+        const numShadowId = nextExprId();
+        return `<shadow type="math_number" id="${numShadowId}">` +
+            `<field name="NUM">${xmlEscape(text)}</field></shadow>`;
+    }
+    let display = text;
+    if (/^".*"$/.test(text)) {
+        try {
+            display = JSON.parse(text);
+        } catch (_err) {
+            display = text;
+        }
+    }
+    const textShadowId = nextExprId();
+    return `<shadow type="text" id="${textShadowId}">` +
+        `<field name="TEXT">${xmlEscape(display)}</field></shadow>`;
+};
+
+const inputXmlForExpression = (name, expr, fallback = '0') => {
+    const blockXmlForExpr = expressionToBlockXml(expr);
+    if (blockXmlForExpr) {
+        return `<value name="${name}">${blockXmlForExpr}</value>`;
+    }
+    let literalValue;
+    if (isExprNode(expr) && expr.kind === 'literal') {
+        literalValue = expr.value;
+    } else if (typeof expr === 'string' || typeof expr === 'number') {
+        literalValue = expr;
+    } else {
+        literalValue = fallback;
+    }
+    return `<value name="${name}">${literalShadowXml(literalValue)}</value>`;
+};
+
+const logicToBlockXml = (type, args) => {
+    const list = Array.isArray(args) ? args.filter(Boolean) : [];
+    if (list.length === 0) return null;
+    if (list.length === 1) return expressionToBlockXml(list[0]) || literalShadowXml('true');
+    const head1 = inputXmlForExpression('OPERAND1', list[0], 'false');
+    const head2 = inputXmlForExpression('OPERAND2', list[1], 'false');
+    let result = `<block type="${type}" id="${nextExprId()}">${head1}${head2}</block>`;
+    for (let i = 2; i < list.length; i += 1) {
+        const operand2Xml = inputXmlForExpression('OPERAND2', list[i], 'false');
+        result = `<block type="${type}" id="${nextExprId()}">` +
+            `<value name="OPERAND1">${result}</value>${operand2Xml}</block>`;
+    }
+    return result;
+};
+
+const expressionToBlockXml = expr => {
+    if (!isExprNode(expr)) return null;
+    if (expr.kind === 'literal') return null;
+
+    if (expr.kind === 'random') {
+        const fromXml = inputXmlForExpression('FROM', expr.args && expr.args[0], '1');
+        const toXml = inputXmlForExpression('TO', expr.args && expr.args[1], '10');
+        return `<block type="operator_random" id="${nextExprId()}">${fromXml}${toXml}</block>`;
+    }
+
+    if (expr.kind === 'mathop') {
+        const which = MATHOP_REVERSE[expr.op] || expr.op;
+        const numXml = inputXmlForExpression('NUM', expr.args && expr.args[0], '0');
+        return `<block type="operator_mathop" id="${nextExprId()}">` +
+            `<field name="OPERATOR">${xmlEscape(which)}</field>${numXml}</block>`;
+    }
+
+    if (expr.kind === 'logic' && expr.op === 'and') {
+        return logicToBlockXml('operator_and', expr.args);
+    }
+    if (expr.kind === 'logic' && expr.op === 'or') {
+        return logicToBlockXml('operator_or', expr.args);
+    }
+    if (expr.kind === 'logic' && expr.op === 'not') {
+        const inner = inputXmlForExpression('OPERAND', expr.args && expr.args[0], 'false');
+        return `<block type="operator_not" id="${nextExprId()}">${inner}</block>`;
+    }
+
+    const reverseKey = `${expr.kind}:${expr.op}`;
+    const reverse = TW_OP_REVERSE[reverseKey];
+    if (reverse) {
+        const aXml = inputXmlForExpression(reverse.a, expr.args && expr.args[0], '0');
+        const bXml = reverse.b ? inputXmlForExpression(reverse.b, expr.args && expr.args[1], '0') : '';
+        return `<block type="${reverse.type}" id="${nextExprId()}">${aXml}${bXml}</block>`;
+    }
+
+    return null;
+};
+
+const conditionInputXml = condition => {
+    if (isExprNode(condition)) {
+        const blockXmlForCondition = expressionToBlockXml(condition);
+        if (blockXmlForCondition) {
+            return `<value name="CONDITION">${blockXmlForCondition}</value>`;
+        }
+    }
+    // Match Scratch convention: leave the CONDITION slot empty when there's
+    // no real expression. Users plug TW boolean blocks (operator_lt / equals
+    // / and / or / not) into the empty hexagonal slot.
+    return '';
+};
 
 const blockXml = (block, options = {}) => {
     if (!block) return '';
@@ -281,7 +514,8 @@ const blockXml = (block, options = {}) => {
         const {definition, argumentIds} = mutationXmlForProcedure(block);
         const prototypeFields = normalizeArgsList(fields.params).map((param, argIndex) => (
             `<value name="${argumentIds[argIndex]}"><shadow type="argument_reporter_string_number"><field name="VALUE">${xmlEscape(param)}</field></shadow></value>`
-        )).join('');
+        ))
+            .join('');
         const bodyXml = sequenceXml(block.body || []);
         return `
             ${blockTagOpen('procedures_definition', block.id, layout)}
@@ -305,7 +539,8 @@ const blockXml = (block, options = {}) => {
         });
         const values = normalizeArgsList(fields.args).map((value, argIndex) => (
             `<value name="${argumentIds[argIndex]}"><shadow type="text"><field name="TEXT">${xmlEscape(value)}</field></shadow></value>`
-        )).join('');
+        ))
+            .join('');
         return `
             ${blockTagOpen('procedures_call', block.id, layout)}
                 ${call}
@@ -345,7 +580,7 @@ const blockXml = (block, options = {}) => {
             values += `<field name="list">${xmlEscape(fields.list || 'items')}</field>`;
             values += `<field name="out">${xmlEscape(fields.out || 'result')}</field>`;
         } else if (block.opcode === 'if' || block.opcode === 'if_else' || block.opcode === 'while') {
-            values += `<field name="condition">${xmlEscape(fields.condition || 'enabled == true')}</field>`;
+            values += conditionInputXml(fields.condition);
         } else if (block.opcode === 'when') {
             values += `<field name="subject">${xmlEscape(fields.subject || 'value')}</field>`;
         } else if (block.opcode === 'when_case') {

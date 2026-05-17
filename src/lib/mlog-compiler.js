@@ -226,14 +226,28 @@ const frameValueToken = (frame, value, fallback = '0') => {
     return valueToken(value, fallback);
 };
 
+const isExprNode = value => value !== null && typeof value === 'object' && typeof value.kind === 'string';
+
 const field = (block, key, fallback = '') => {
     const fields = block && block.fields && typeof block.fields === 'object' ? block.fields : {};
     if (!objectHasOwn(fields, key)) return fallback;
     const value = fields[key];
+    if (isExprNode(value)) return fallback;
     if (Array.isArray(value)) {
         return value.length > 0 ? value.join(', ') : fallback;
     }
     return token(value, fallback);
+};
+
+const fieldRaw = (block, key, fallback = '') => {
+    const fields = block && block.fields && typeof block.fields === 'object' ? block.fields : {};
+    if (!objectHasOwn(fields, key)) return fallback;
+    const value = fields[key];
+    if (isExprNode(value)) return value;
+    if (Array.isArray(value)) {
+        return value.length > 0 ? value.join(', ') : fallback;
+    }
+    return value == null ? fallback : value;
 };
 
 const fieldList = (block, key) => {
@@ -321,6 +335,294 @@ const invertedCondition = condition => {
     };
 };
 
+const MATHOP_TO_MLOG = {
+    abs: 'abs',
+    floor: 'floor',
+    ceiling: 'ceil',
+    ceil: 'ceil',
+    round: 'round',
+    sqrt: 'sqrt',
+    sin: 'sin',
+    cos: 'cos',
+    tan: 'tan',
+    asin: 'asin',
+    acos: 'acos',
+    atan: 'atan',
+    ln: 'log',
+    log: 'log10',
+    sign: 'sign'
+};
+
+const expressionToText = expr => {
+    if (!isExprNode(expr)) return token(expr, '');
+    switch (expr.kind) {
+    case 'literal':
+        return token(expr.value, '');
+    case 'compare':
+        return `${expressionToText(expr.args[0])} ${expr.op} ${expressionToText(expr.args[1])}`;
+    case 'op':
+        return `(${expressionToText(expr.args[0])} ${expr.op} ${expressionToText(expr.args[1] || {kind: 'literal', value: '0'})})`;
+    case 'mathop':
+        return `${expr.op}(${expressionToText(expr.args[0])})`;
+    case 'logic':
+        if (expr.op === 'not') return `not (${expressionToText(expr.args[0])})`;
+        return expr.args.map(arg => `(${expressionToText(arg)})`).join(` ${expr.op} `);
+    case 'random':
+        return `rand(${expressionToText(expr.args[0])}, ${expressionToText(expr.args[1])})`;
+    case 'select':
+        return `select(${expressionToText(expr.cond)}, ${expressionToText(expr.args[0])}, ${expressionToText(expr.args[1])})`;
+    case 'string':
+        return `${expr.op}(${expr.args.map(expressionToText).join(', ')})`;
+    default:
+        return expr.kind;
+    }
+};
+
+const literalExpr = value => ({kind: 'literal', value: value == null ? '0' : String(value)});
+
+const materializeExpression = (expr, ctx, indentLevel, frame) => {
+    if (!isExprNode(expr)) {
+        return {lines: [], value: frameValueToken(frame, expr, '0')};
+    }
+    switch (expr.kind) {
+    case 'literal':
+        return {lines: [], value: frameValueToken(frame, expr.value, '0')};
+    case 'op': {
+        const a = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+        const b = materializeExpression(expr.args[1] || literalExpr('0'), ctx, indentLevel, frame);
+        const out = nextTemp(ctx, 'expr');
+        const op = LOGIC_OPS.has(expr.op) ? expr.op : 'add';
+        return {
+            lines: [
+                ...a.lines,
+                ...b.lines,
+                line(indentLevel, emitStatement('op', [op, out, a.value, b.value]))
+            ],
+            value: out
+        };
+    }
+    case 'mathop': {
+        const op = MATHOP_TO_MLOG[expr.op] || expr.op;
+        if (op === 'expe') {
+            const a = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+            const out = nextTemp(ctx, 'expr');
+            return {
+                lines: [
+                    ...a.lines,
+                    line(indentLevel, emitStatement('op', ['pow', out, '2.718281828459045', a.value]))
+                ],
+                value: out
+            };
+        }
+        if (op === 'pow10') {
+            const a = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+            const out = nextTemp(ctx, 'expr');
+            return {
+                lines: [
+                    ...a.lines,
+                    line(indentLevel, emitStatement('op', ['pow', out, '10', a.value]))
+                ],
+                value: out
+            };
+        }
+        if (!LOGIC_OPS.has(op)) {
+            addDiagnostic(ctx, 'warning', `不支持的数学操作：${expr.op}`, null);
+            const a = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+            return {lines: a.lines, value: a.value};
+        }
+        const a = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+        const out = nextTemp(ctx, 'expr');
+        return {
+            lines: [
+                ...a.lines,
+                line(indentLevel, emitStatement('op', [op, out, a.value, '0']))
+            ],
+            value: out
+        };
+    }
+    case 'compare': {
+        const a = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+        const b = materializeExpression(expr.args[1], ctx, indentLevel, frame);
+        const out = nextTemp(ctx, 'cmp');
+        const op = CONDITION_OPS.has(expr.op) ? expr.op : 'equal';
+        return {
+            lines: [
+                ...a.lines,
+                ...b.lines,
+                line(indentLevel, emitStatement('op', [op, out, a.value, b.value]))
+            ],
+            value: out
+        };
+    }
+    case 'logic': {
+        if (expr.op === 'not') {
+            const a = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+            const out = nextTemp(ctx, 'not');
+            return {
+                lines: [
+                    ...a.lines,
+                    line(indentLevel, emitStatement('op', ['equal', out, a.value, 'false']))
+                ],
+                value: out
+            };
+        }
+        const mlogOp = expr.op === 'and' ? 'land' : 'or';
+        if (!Array.isArray(expr.args) || expr.args.length === 0) {
+            return {lines: [], value: expr.op === 'and' ? 'true' : 'false'};
+        }
+        if (expr.args.length === 1) {
+            return materializeExpression(expr.args[0], ctx, indentLevel, frame);
+        }
+        const first = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+        const out = nextTemp(ctx, expr.op);
+        const lines = [...first.lines];
+        let prev = first.value;
+        for (let i = 1; i < expr.args.length; i += 1) {
+            const next = materializeExpression(expr.args[i], ctx, indentLevel, frame);
+            lines.push(...next.lines);
+            lines.push(line(indentLevel, emitStatement('op', [mlogOp, out, prev, next.value])));
+            prev = out;
+        }
+        return {lines, value: out};
+    }
+    case 'random': {
+        const fromMat = materializeExpression(expr.args[0] || literalExpr('0'), ctx, indentLevel, frame);
+        const toMat = materializeExpression(expr.args[1] || literalExpr('1'), ctx, indentLevel, frame);
+        const range = nextTemp(ctx, 'rand_range');
+        const r = nextTemp(ctx, 'rand_r');
+        const out = nextTemp(ctx, 'rand');
+        return {
+            lines: [
+                ...fromMat.lines,
+                ...toMat.lines,
+                line(indentLevel, emitStatement('op', ['sub', range, toMat.value, fromMat.value])),
+                line(indentLevel, emitStatement('op', ['rand', r, range, '0'])),
+                line(indentLevel, emitStatement('op', ['add', out, r, fromMat.value]))
+            ],
+            value: out
+        };
+    }
+    case 'select': {
+        const condMat = materializeExpression(expr.cond, ctx, indentLevel, frame);
+        const aMat = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+        const bMat = materializeExpression(expr.args[1], ctx, indentLevel, frame);
+        const out = nextTemp(ctx, 'sel');
+        return {
+            lines: [
+                ...condMat.lines,
+                ...aMat.lines,
+                ...bMat.lines,
+                line(indentLevel, emitStatement('select', ['notEqual', out, condMat.value, 'false', aMat.value, bMat.value]))
+            ],
+            value: out
+        };
+    }
+    case 'string': {
+        addDiagnostic(ctx, 'warning', `mlog 不直接支持字符串操作 ${expr.op}，已退化为首参数。`, null);
+        const a = materializeExpression(expr.args[0] || literalExpr(''), ctx, indentLevel, frame);
+        return a;
+    }
+    default:
+        addDiagnostic(ctx, 'warning', `未知表达式节点：${expr.kind}`, null);
+        return {lines: [], value: '0'};
+    }
+};
+
+const lowerConditionToJump = (expr, ctx, indentLevel, frame, label, jumpWhen) => {
+    if (!isExprNode(expr)) {
+        const value = frameValueToken(frame, expr, '0');
+        const op = jumpWhen === 'true' ? 'notEqual' : 'equal';
+        return [line(indentLevel, emitStatement('jump', [label, op, value, 'false']))];
+    }
+
+    if (expr.kind === 'literal') {
+        const value = frameValueToken(frame, expr.value, '0');
+        const op = jumpWhen === 'true' ? 'notEqual' : 'equal';
+        return [line(indentLevel, emitStatement('jump', [label, op, value, 'false']))];
+    }
+
+    if (expr.kind === 'compare') {
+        const a = materializeExpression(expr.args[0], ctx, indentLevel, frame);
+        const b = materializeExpression(expr.args[1], ctx, indentLevel, frame);
+        let op = CONDITION_OPS.has(expr.op) ? expr.op : 'equal';
+        if (jumpWhen === 'false') {
+            op = CONDITION_INVERSES[op] || op;
+        }
+        return [
+            ...a.lines,
+            ...b.lines,
+            line(indentLevel, emitStatement('jump', [label, op, a.value, b.value]))
+        ];
+    }
+
+    if (expr.kind === 'logic' && expr.op === 'not') {
+        return lowerConditionToJump(expr.args[0], ctx, indentLevel, frame, label, jumpWhen === 'true' ? 'false' : 'true');
+    }
+
+    if (expr.kind === 'logic') {
+        const args = Array.isArray(expr.args) ? expr.args.filter(Boolean) : [];
+        if (args.length === 0) {
+            const literal = expr.op === 'and';
+            if ((jumpWhen === 'true' && literal) || (jumpWhen === 'false' && !literal)) {
+                return [line(indentLevel, emitStatement('jump', [label, 'always', '0', '0']))];
+            }
+            return [];
+        }
+        if (args.length === 1) {
+            return lowerConditionToJump(args[0], ctx, indentLevel, frame, label, jumpWhen);
+        }
+
+        const isAnd = expr.op === 'and';
+        const shortCircuitOnSameDirection = (isAnd && jumpWhen === 'false') || (!isAnd && jumpWhen === 'true');
+        if (shortCircuitOnSameDirection) {
+            const lines = [];
+            args.forEach(arg => {
+                lines.push(...lowerConditionToJump(arg, ctx, indentLevel, frame, label, jumpWhen));
+            });
+            return lines;
+        }
+
+        const fallthroughLabel = nextLabel(ctx, isAnd ? 'and_fall' : 'or_fall');
+        const oppositeJumpWhen = jumpWhen === 'true' ? 'false' : 'true';
+        const lines = [];
+        for (let i = 0; i < args.length - 1; i += 1) {
+            lines.push(...lowerConditionToJump(args[i], ctx, indentLevel, frame, fallthroughLabel, oppositeJumpWhen));
+        }
+        lines.push(...lowerConditionToJump(args[args.length - 1], ctx, indentLevel, frame, label, jumpWhen));
+        lines.push(line(indentLevel, `${fallthroughLabel}:`));
+        return lines;
+    }
+
+    const mat = materializeExpression(expr, ctx, indentLevel, frame);
+    const op = jumpWhen === 'true' ? 'notEqual' : 'equal';
+    return [
+        ...mat.lines,
+        line(indentLevel, emitStatement('jump', [label, op, mat.value, 'false']))
+    ];
+};
+
+const preMaterializeFields = (block, ctx, indentLevel, frame, skipKeys = []) => {
+    if (!block || !block.fields) return {block, lines: []};
+    const lines = [];
+    let dirty = false;
+    const nextFields = {};
+    Object.entries(block.fields).forEach(([key, value]) => {
+        if (skipKeys.includes(key)) {
+            nextFields[key] = value;
+            return;
+        }
+        if (isExprNode(value)) {
+            const mat = materializeExpression(value, ctx, indentLevel, frame);
+            lines.push(...mat.lines);
+            nextFields[key] = mat.value;
+            dirty = true;
+            return;
+        }
+        nextFields[key] = value;
+    });
+    return {block: dirty ? {...block, fields: nextFields} : block, lines};
+};
+
 const buildListIndex = sharedLists => {
     const index = new Map();
     sharedLists.forEach(list => {
@@ -333,6 +635,28 @@ const buildListIndex = sharedLists => {
         });
     });
     return index;
+};
+
+const defineListInContext = (ctx, block) => {
+    const name = token(field(block, 'name', 'items'), 'items');
+    const cell = token(field(block, 'cell', 'cell1'), 'cell1');
+    const start = Number.parseInt(field(block, 'start', '0'), 10);
+    const length = Number.parseInt(field(block, 'length', '16'), 10);
+    const list = {
+        id: block.id || name,
+        name,
+        cell,
+        start: Number.isFinite(start) ? start : 0,
+        length: Number.isFinite(length) ? length : 16,
+        note: 'inline'
+    };
+    [list.id, list.name, list.cell].forEach(key => {
+        const text = token(key, '');
+        if (text) {
+            ctx.lists.set(text, list);
+        }
+    });
+    return list;
 };
 
 const resolveList = (ctx, block) => {
@@ -431,10 +755,27 @@ const compileIf = (block, ctx, indentLevel, frame) => {
         return compileEmptyContainer(block, ctx, indentLevel, `if ${field(block, 'condition', 'condition')}`);
     }
 
-    const condition = parseCondition(field(block, 'condition', 'condition'), frame);
-    const lines = [line(indentLevel, `# if ${field(block, 'condition', 'condition')}`)];
+    const condRaw = fieldRaw(block, 'condition', '');
+    const conditionLabel = isExprNode(condRaw) ? expressionToText(condRaw) : field(block, 'condition', 'condition');
+    const lines = [line(indentLevel, `# if ${conditionLabel}`)];
+
+    if (isExprNode(condRaw)) {
+        const endLabel = nextLabel(ctx, 'if_end');
+        lines.push(...lowerConditionToJump(condRaw, ctx, indentLevel, frame, endLabel, 'false'));
+        lines.push(...compileBlockList(block.body, ctx, indentLevel + 1, frame));
+        lines.push(line(indentLevel, `${endLabel}:`));
+        return lines;
+    }
+
+    const rawText = field(block, 'condition', '');
+    if (!rawText || !String(rawText).trim()) {
+        addDiagnostic(ctx, 'error', 'if 的条件槽是空的，请拖入一个比较 / 与 / 或 / 非积木。body 已被跳过。', block);
+        return lines.concat([line(indentLevel, '# if (no condition): body skipped')]);
+    }
+
+    const condition = parseCondition(rawText, frame);
     if (!condition) {
-        addDiagnostic(ctx, 'warning', `无法解析 if 条件：${field(block, 'condition', 'condition')}，body 会按顺序展开。`, block);
+        addDiagnostic(ctx, 'warning', `无法解析 if 条件：${rawText}，body 会按顺序展开。`, block);
         return lines.concat(compileBlockList(block.body, ctx, indentLevel + 1, frame));
     }
     if (condition.kind === 'boolean') {
@@ -460,10 +801,38 @@ const compileIfElse = (block, ctx, indentLevel, frame) => {
     }
 
     const elseBody = Array.isArray(block.elseBody) ? block.elseBody : [];
-    const condition = parseCondition(field(block, 'condition', 'condition'), frame);
-    const lines = [line(indentLevel, `# if else ${field(block, 'condition', 'condition')}`)];
+    const condRaw = fieldRaw(block, 'condition', '');
+    const conditionLabel = isExprNode(condRaw) ? expressionToText(condRaw) : field(block, 'condition', 'condition');
+    const lines = [line(indentLevel, `# if else ${conditionLabel}`)];
+
+    if (isExprNode(condRaw)) {
+        const elseLabel = nextLabel(ctx, 'else');
+        const endLabel = nextLabel(ctx, 'if_else_end');
+        lines.push(...lowerConditionToJump(condRaw, ctx, indentLevel, frame, elseLabel, 'false'));
+        lines.push(...compileBlockList(block.body, ctx, indentLevel + 1, frame));
+        lines.push(line(indentLevel, emitStatement('jump', [endLabel, 'always', '0', '0'])));
+        lines.push(line(indentLevel, `${elseLabel}:`));
+        if (elseBody.length === 0) {
+            addDiagnostic(ctx, 'warning', 'if else 暂无 else body，else 分支为空。', block);
+        } else {
+            lines.push(...compileBlockList(elseBody, ctx, indentLevel + 1, frame));
+        }
+        lines.push(line(indentLevel, `${endLabel}:`));
+        return lines;
+    }
+
+    const rawText = field(block, 'condition', '');
+    if (!rawText || !String(rawText).trim()) {
+        addDiagnostic(ctx, 'error', 'if else 的条件槽是空的，请拖入一个比较 / 与 / 或 / 非积木。else 分支会被执行。', block);
+        if (elseBody.length === 0) {
+            return lines.concat([line(indentLevel, '# if else (no condition): empty else')]);
+        }
+        return lines.concat(compileBlockList(elseBody, ctx, indentLevel + 1, frame));
+    }
+
+    const condition = parseCondition(rawText, frame);
     if (!condition) {
-        addDiagnostic(ctx, 'warning', `无法解析 if else 条件：${field(block, 'condition', 'condition')}，then body 会按顺序展开。`, block);
+        addDiagnostic(ctx, 'warning', `无法解析 if else 条件：${rawText}，then body 会按顺序展开。`, block);
         return lines.concat(compileBlockList(block.body, ctx, indentLevel + 1, frame));
     }
     if (condition.kind === 'boolean') {
@@ -494,10 +863,30 @@ const compileWhile = (block, ctx, indentLevel, frame) => {
         return compileEmptyContainer(block, ctx, indentLevel, `while ${field(block, 'condition', 'condition')}`);
     }
 
-    const condition = parseCondition(field(block, 'condition', 'condition'), frame);
-    const lines = [line(indentLevel, `# while ${field(block, 'condition', 'condition')}`)];
+    const condRaw = fieldRaw(block, 'condition', '');
+    const conditionLabel = isExprNode(condRaw) ? expressionToText(condRaw) : field(block, 'condition', 'condition');
+    const lines = [line(indentLevel, `# while ${conditionLabel}`)];
+
+    if (isExprNode(condRaw)) {
+        const startLabel = nextLabel(ctx, 'while_start');
+        const endLabel = nextLabel(ctx, 'while_end');
+        lines.push(line(indentLevel, `${startLabel}:`));
+        lines.push(...lowerConditionToJump(condRaw, ctx, indentLevel, frame, endLabel, 'false'));
+        lines.push(...compileBlockList(block.body, ctx, indentLevel + 1, frame));
+        lines.push(line(indentLevel, emitStatement('jump', [startLabel, 'always', '0', '0'])));
+        lines.push(line(indentLevel, `${endLabel}:`));
+        return lines;
+    }
+
+    const rawText = field(block, 'condition', '');
+    if (!rawText || !String(rawText).trim()) {
+        addDiagnostic(ctx, 'error', 'while 的条件槽是空的，请拖入一个比较 / 与 / 或 / 非积木。body 已被跳过。', block);
+        return lines.concat([line(indentLevel, '# while (no condition): body skipped')]);
+    }
+
+    const condition = parseCondition(rawText, frame);
     if (!condition) {
-        addDiagnostic(ctx, 'warning', `while 条件暂不能安全降低：${field(block, 'condition', 'condition')}，body 会按顺序展开。`, block);
+        addDiagnostic(ctx, 'warning', `while 条件暂不能安全降低：${rawText}，body 会按顺序展开。`, block);
         return lines.concat(compileBlockList(block.body, ctx, indentLevel + 1, frame));
     }
     if (condition.kind === 'boolean') {
@@ -814,7 +1203,37 @@ const compileFunReturn = (block, ctx, indentLevel, frame) => {
     ];
 };
 
+const FIELD_SKIP_KEYS = {
+    if: ['condition'],
+    if_else: ['condition'],
+    while: ['condition'],
+    when: ['subject'],
+    when_case: ['matches'],
+    fun_call: ['args'],
+    fun_define: ['params'],
+    fun_arg: ['name'],
+    list_define: ['name', 'cell'],
+    list_get: ['list', 'out'],
+    list_set: ['list'],
+    list_find_first: ['list', 'out'],
+    list_count_value: ['list', 'out'],
+    list_ref: ['name']
+};
+
 const compileBlock = (block, ctx, indentLevel, frame = null) => {
+    if (!block || typeof block !== 'object') {
+        return [];
+    }
+
+    const skipKeys = FIELD_SKIP_KEYS[block.opcode] || [];
+    const {block: lowered, lines: prelude} = preMaterializeFields(block, ctx, indentLevel, frame, skipKeys);
+    if (prelude.length > 0) {
+        return prelude.concat(compileBlockInner(lowered, ctx, indentLevel, frame));
+    }
+    return compileBlockInner(lowered, ctx, indentLevel, frame);
+};
+
+const compileBlockInner = (block, ctx, indentLevel, frame = null) => {
     if (!block || typeof block !== 'object') {
         return [];
     }
@@ -997,6 +1416,7 @@ const compileBlock = (block, ctx, indentLevel, frame = null) => {
     case 'for_range':
         return compileForRange(block, ctx, indentLevel, frame);
     case 'list_define':
+        defineListInContext(ctx, block);
         return [line(indentLevel, `# list ${field(block, 'name', 'items')} ${field(block, 'cell', 'cell1')}#${field(block, 'start', '0')} len ${field(block, 'length', '16')}`)];
     case 'list_get':
         return compileListGet(block, ctx, indentLevel, frame);
@@ -1101,7 +1521,8 @@ export const compileProject = projectSnapshot => {
 
     return {
         ok: !diagnostics.some(item => item.level === 'error'),
-        code: processors.map(item => item.code).join('\n\n').trimEnd(),
+        code: processors.map(item => item.code).join('\n\n')
+            .trimEnd(),
         processors,
         diagnostics
     };
