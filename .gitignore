@@ -26,3 +26,8 @@ npm-*
 
 # for act
 .secrets
+
+# MlogScratchTW specific
+*.log
+/dist-desktop
+/electron/node_modules

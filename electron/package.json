@@ -1,0 +1,38 @@
+{
+  "name": "mlog-scratch-tw",
+  "version": "1.0.0",
+  "description": "MlogScratch TW Desktop Editor",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.mlog.scratch-tw",
+    "productName": "MlogScratch TW",
+    "directories": {
+      "output": "../dist-desktop"
+    },
+    "files": [
+      "main.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../build",
+        "to": "build"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
