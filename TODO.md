@@ -32,6 +32,13 @@ The current large stage area is the main graph canvas. The preview area is only 
   - `for_range`
 - `list` and `fun` compiler behavior already exists and should not be accidentally replaced during stage work.
 
+## Electron Desktop Shell
+
+- `electron/main.js` is a minimal static-file HTTP shell over the web build (`build/`, entry `editor.html`); no preload, no custom API routes, `nodeIntegration: false`.
+- `electron/package.json`: `npm start` = `electron .`; `npm run build` = `electron-builder --win`, output to `../dist-desktop` (NSIS installer).
+- The shell does not expose `/api/mlog-check`, so the MlogChecker HTTP bridge is unavailable inside the packaged app.
+- Desktop shell work is independent of the stage-graph rewrite below.
+
 ## Hard Constraints
 
 - Keep TurboWarp native architecture:
@@ -202,6 +209,7 @@ The current large stage area is the main graph canvas. The preview area is only 
 - Run `npm run build`.
 - Run the editor locally.
 - Open the page in a browser.
+- Desktop: `cd electron && npm install && npm run build`, confirm `../dist-desktop` contains the NSIS installer and the packaged app opens the editor.
 - Take a screenshot after UI changes and inspect the real result.
 - If browser automation is blocked by stale Playwright state, kill the stale instance and use a fresh one.
 - If `127.0.0.1` refuses connection, restart the local dev server first.

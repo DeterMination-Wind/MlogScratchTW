@@ -33,6 +33,7 @@
   - `when_else`
   - `while`
   - `for_range`
+- The `if` / `if_else` / `while` condition inputs accept TurboWarp native comparison, `and`, `or`, and `not` operator blocks (`src/lib/mlog-sugar-blocks.js`).
 
 ## Current Implemented State
 
@@ -126,6 +127,12 @@
   - `src/components/sprite-info/sprite-info.jsx`
   - `src/components/stage-selector/stage-selector.jsx`
 
+## Electron Desktop Shell
+
+- `electron/main.js` is a minimal static-file HTTP server over the web build (`build/`, entry `editor.html`) inside a `BrowserWindow` (`nodeIntegration: false`, `contextIsolation: true`, no preload, no custom API routes).
+- `electron/package.json`: `npm start` = `electron .`; `npm run build` = `electron-builder --win`, output goes to `../dist-desktop` (NSIS installer).
+- The shell does not expose `/api/mlog-check`, so the MlogChecker HTTP bridge works only in the web dev server context, not inside the packaged app.
+
 ## Working Rules
 
 - Do not use `rg` in large folders for this task. Prefer `searchFile`.
@@ -152,3 +159,7 @@
   - multiple nodes of the same type receive unique numbered identities
   - selecting a processor overlays its linked nodes with ordered labels such as `cell2[3]`
   - the right-bottom node / role display uses Mindustry in-game icons
+- Desktop shell:
+  - `npm run build` (web build into `build/`)
+  - `cd electron && npm install && npm run build`
+  - verify the NSIS installer appears in `../dist-desktop` and the packaged app opens the editor served from `build/`

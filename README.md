@@ -8,8 +8,19 @@ If you just want to play with the GUI then it's the same process as upstream scr
 
 ## MlogChecker bridge
 
-The UI exposes `window.MlogScratchStudio.registerChecker(checker)` so a desktop preload or Node-side adapter can register the local `MlogChecker` kernel.
-For a CLI-based bridge, see `src/lib/mlog-checker-cli-bridge.js`.
+The UI exposes `window.MlogScratchStudio.registerChecker(checker)`, which forwards to the backend adapter in `src/lib/mlog-backend.js`.
+On startup, `src/lib/mlog-checker-bootstrap.js` probes `GET /api/mlog-check` and, if reachable, auto-registers an HTTP bridge (`src/lib/mlog-checker-http-bridge.js`) against that endpoint.
+For a Node-side checker, use the CLI bridge in `src/lib/mlog-checker-cli-bridge.js`, which spawns the MlogChecker jar (`java -jar ... check`).
+Note: the Electron shell below is a static HTTP server only and does not currently expose `/api/mlog-check`, so the HTTP bridge works in the web dev server context, not inside the packaged desktop app.
+
+## Desktop shell (Electron)
+
+`electron/` contains a minimal desktop shell:
+
+- `electron/main.js` — starts a local static HTTP server over the web build (`../build`, entry `editor.html`) and opens it in a `BrowserWindow` (`nodeIntegration: false`, `contextIsolation: true`, no preload, no custom API routes, application menu removed).
+- `electron/package.json` — `npm start` runs `electron .`; `npm run build` runs `electron-builder --win` and writes the NSIS installer to `../dist-desktop` (e.g. `MlogScratch TW Setup 1.0.0.exe`).
+
+Build order: run the web build (`npm run build`) first so `build/` exists, then `cd electron && npm run build`.
 
 ## License
 
